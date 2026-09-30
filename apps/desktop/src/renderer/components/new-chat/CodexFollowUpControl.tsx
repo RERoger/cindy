@@ -40,6 +40,7 @@ export function CodexFollowUpControl({ sessionId }: { sessionId?: string }) {
             return;
           }
         }
+        setSupported(true);
         const value = await api.codexFollowUp.get(sessionId);
         if (current() && token === generation.current && !saving.current) setState(value);
       } catch {

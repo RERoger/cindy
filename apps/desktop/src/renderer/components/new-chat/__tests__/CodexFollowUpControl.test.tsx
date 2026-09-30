@@ -125,6 +125,18 @@ describe('Codex follow-up control', () => {
     await waitFor(() => expect(view.queryByRole('combobox')).toBeNull());
     expect(mock.get).not.toHaveBeenCalled();
   });
+  it('restores the control on focus after the same host gains support', async () => {
+    mock.getProjection.mockResolvedValueOnce({});
+    const view = render(<CodexFollowUpControl sessionId="upgraded-host" />);
+    await waitFor(() => expect(view.queryByRole('combobox')).toBeNull());
+    mock.getProjection.mockResolvedValue({ composerAutoDelivery: true });
+    fireEvent(window, new Event('focus'));
+    await waitFor(() => expect(view.getByRole('combobox')).toBeTruthy());
+    await waitFor(() =>
+      expect((view.getByRole('combobox') as HTMLSelectElement).disabled).toBe(false),
+    );
+    expect(mock.get).toHaveBeenCalledWith('upgraded-host');
+  });
   it('restores the global default using a null override', async () => {
     render(<CodexFollowUpControl />);
     await waitFor(() =>

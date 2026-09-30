@@ -2120,7 +2120,12 @@ export class AgentInputCoordinator {
 
     if (!this.isTurnSteerable(sessionId, state)) {
       if (opts?.fallbackToTurn === false) return false;
-      this.fallbackPreparedAsTurn(sessionId, item, opts?.removeFromQueue === true);
+      this.fallbackPreparedAsTurn(
+        sessionId,
+        item,
+        opts?.removeFromQueue === true,
+        opts?.durableAutoSteer === true,
+      );
       if (opts?.touchUserSend) this.touchUserSend(sessionId);
       return true;
     }
@@ -2351,7 +2356,12 @@ export class AgentInputCoordinator {
           return finishSteerRequest(false);
         }
         this.emit(sessionId);
-        this.fallbackPreparedAsTurn(sessionId, item, opts?.removeFromQueue === true);
+        this.fallbackPreparedAsTurn(
+          sessionId,
+          item,
+          opts?.removeFromQueue === true,
+          opts?.durableAutoSteer === true,
+        );
         if (opts?.touchUserSend) this.touchUserSend(sessionId);
         return finishSteerRequest(true);
       }
@@ -5643,6 +5653,7 @@ export class AgentInputCoordinator {
     sessionId: string,
     item: AgentInputQueuedMessage,
     removeFromQueue: boolean,
+    preserveQueuePosition = false,
   ): void {
     const state = this.getState(sessionId);
     // 插话回落成普通派发 = 也是一条新用户输入。普通 composer / 队列项可能在
@@ -5660,7 +5671,15 @@ export class AgentInputCoordinator {
     state.queuePaused = false;
     this.clearSteeringMarker(state, item.clientId);
     state.queueEditLocks = state.queueEditLocks.filter((id) => id !== item.clientId);
-    this.movePreparedItemToQueueFront(state, item, removeFromQueue);
+    if (preserveQueuePosition) {
+      // Automatic steer falls back to FIFO; only explicit insertion gets priority.
+      // Replace the row with the prepared item to retain its trusted snapshot.
+      const index = state.pendingQueue.findIndex((queued) => queued.clientId === item.clientId);
+      if (index >= 0) state.pendingQueue[index] = item;
+      else state.pendingQueue.push(item);
+    } else {
+      this.movePreparedItemToQueueFront(state, item, removeFromQueue);
+    }
     this.emit(sessionId);
     this.scheduleDrain(sessionId, 'steer-fallback');
   }

@@ -12947,6 +12947,67 @@ describe('AgentInputCoordinator 中断自动续跑', () => {
 
 
 describe('Codex default follow-up delivery', () => {
+  it('keeps FIFO when the turn ends during automatic-steer persistence', async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const h = createHarness({
+      awaitQueuePersistence: vi
+        .fn()
+        .mockImplementationOnce(() => gate)
+        .mockResolvedValue(undefined),
+    });
+    h.setRunning(true);
+    h.setAgentKind('codex');
+    h.coordinator.enqueue('auto-fifo-end', makeItem('a', 'first'));
+    const sending = h.coordinator.enqueueAutoSteer('auto-fifo-end', makeItem('b', 'second'));
+    await Promise.resolve();
+    h.setRunning(false);
+    release();
+    await sending;
+    await flush();
+    expect(h.steerToAgent).not.toHaveBeenCalled();
+    expect(h.sendToAgent.mock.calls[0]?.[1]).toMatchObject({ content: 'first' });
+    expect(
+      h.coordinator.getProjection('auto-fifo-end').pendingQueue.map((item) => item.clientId),
+    ).toEqual(['b']);
+  });
+  it('keeps FIFO when native automatic steer rejects with NO_ACTIVE_TURN', async () => {
+    const h = createHarness({ awaitQueuePersistence: async () => {} });
+    h.setRunning(true);
+    h.setAgentKind('codex');
+    h.coordinator.enqueue('auto-fifo-reject', makeItem('a', 'first'));
+    h.reconcileTurnIdle.mockImplementationOnce(() => {
+      h.setRunning(false);
+      return true;
+    });
+    h.steerToAgent.mockRejectedValueOnce(new Error('[NO_ACTIVE_TURN] Session has no active turn'));
+    await h.coordinator.enqueueAutoSteer('auto-fifo-reject', makeItem('b', 'second'));
+    await flush();
+    expect(h.sendToAgent.mock.calls[0]?.[1]).toMatchObject({ content: 'first' });
+    expect(
+      h.coordinator.getProjection('auto-fifo-reject').pendingQueue.map((item) => item.clientId),
+    ).toEqual(['b']);
+  });
+  it('preserves explicit queue insertion priority on manual steer fallback', async () => {
+    const h = createHarness();
+    h.setRunning(true);
+    h.setAgentKind('codex');
+    h.coordinator.enqueue('manual-priority', makeItem('a', 'first'));
+    h.coordinator.enqueue('manual-priority', makeItem('b', 'second'));
+    h.reconcileTurnIdle.mockImplementationOnce(() => {
+      h.setRunning(false);
+      return true;
+    });
+    h.steerToAgent.mockRejectedValueOnce(new Error('[NO_ACTIVE_TURN] Session has no active turn'));
+    await h.coordinator.steer('manual-priority', makeItem('b', 'second'), {
+      removeFromQueue: true,
+    });
+    await flush();
+    expect(h.sendToAgent.mock.calls[0]?.[1]).toMatchObject({ content: 'second' });
+  });
+
   it('persists the queue and attempt before steering, preserving one client identity', async () => {
     const persist = vi.fn(async () => {});
     const h = createHarness({ awaitQueuePersistence: persist });
