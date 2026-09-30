@@ -14189,5 +14189,15 @@
   "pluginDeviceAuthorization": {
     "title": "Authorize Plugin Login",
     "description": "Open {{host}} on this device to authorize the plugin running this task. Its credentials stay on the originating device."
+  },
+  "codexFollowUp": {
+    "globalLabel": "Codex follow-up messages",
+    "globalHint": "Default delivery for follow-up messages while Codex works. Applies only to ordinary Codex tasks.",
+    "taskLabel": "Follow-up delivery",
+    "taskHint": "Queue follow-up messages during the conversation, or steer the current conversation.",
+    "queue": "Queue",
+    "steer": "Steer",
+    "inherit": "Use global: {{mode}}",
+    "saveFailed": "Could not save. Please try again."
   }
 }

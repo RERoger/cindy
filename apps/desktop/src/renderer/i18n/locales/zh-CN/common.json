@@ -14170,5 +14170,15 @@
   "pluginDeviceAuthorization": {
     "title": "授权插件登录",
     "description": "在这台设备打开 {{host}}，为执行此任务的插件授权。凭据保存在发起授权的设备上。"
+  },
+  "codexFollowUp": {
+    "globalLabel": "Codex 跟进消息",
+    "globalHint": "Codex 工作期间，新消息的默认处理方式。仅影响普通 Codex 任务。",
+    "taskLabel": "对话跟进方式",
+    "taskHint": "对话过程中的后续消息加入排队，或引导当前对话",
+    "queue": "排队",
+    "steer": "引导",
+    "inherit": "跟随全局：{{mode}}",
+    "saveFailed": "保存失败，请重试。"
   }
 }

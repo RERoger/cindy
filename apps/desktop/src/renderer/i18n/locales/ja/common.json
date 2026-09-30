@@ -14170,5 +14170,15 @@
   "pluginDeviceAuthorization": {
     "title": "プラグインのログインを認証",
     "description": "このデバイスで {{host}} を開き、このタスクを実行するプラグインを認証します。認証情報は認証を開始したデバイスに保存されます。"
+  },
+  "codexFollowUp": {
+    "globalLabel": "Codex の追加メッセージ",
+    "globalHint": "Codex 作業中の追加メッセージの既定の送信方法。通常の Codex タスクにのみ適用されます。",
+    "taskLabel": "追加メッセージの送信方法",
+    "taskHint": "追加メッセージをキューに入れるか、現在の会話に追加します。",
+    "queue": "キュー",
+    "steer": "誘導",
+    "inherit": "全体設定：{{mode}}",
+    "saveFailed": "保存に失敗しました。再試行してください。"
   }
 }
