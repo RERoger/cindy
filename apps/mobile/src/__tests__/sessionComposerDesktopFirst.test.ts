@@ -262,7 +262,7 @@ describe('mobile session composer desktop-first surface', () => {
     expect(source).toContain('composerRuntimePillTextRisky');
     expect(source).toContain('color: colors.statusAccent');
     expect(source).not.toContain("import { BlurView } from 'expo-blur';");
-    expect(source).toContain("import { BlurBackdrop } from '@/session/BlurBackdrop';");
+    expect(source).toContain("import { BlurBackdrop, FLOATING_CHROME_BLUR_INTENSITY } from '@/session/BlurBackdrop';");
     expect(source).toContain('<SessionHeaderNativeBlur height=');
     expect(source).toMatch(/<SessionHeaderNativeTitle\s+title=\{sharedTaskEnded \? t\('sharedTask.ended'\) : title\}/);
     expect(source).toContain('<SessionHeaderNativeActions');
@@ -802,7 +802,9 @@ describe('mobile session composer desktop-first surface', () => {
     // 手势被系统/滚动打断时撤销按下即录(review P1)。
     expect(source).toContain('cancelVoiceForAppBackground();');
     expect(source).toContain('testID="session.voiceRecordingPill"');
-    expect(source).toContain('{ width: voiceRecordingTimer.pillWidth }');
+    // 胶囊宽度驱动语音按钮外框(过渡由 voicePillWidthMotion 负责);外框要带上按钮的
+    // hitSlop,否则收起态 34pt 麦克风的命中区会因新的直接父视图而缩小。
+    expect(source).toContain('<VoicePillWidthFrame hitSlop={COMPOSER_CONTROL_HIT_SLOP} width={voiceRecordingTimer.pillWidth}>');
     expect(source).not.toContain('voiceDuration');
     expect(source).not.toContain('recordingDuration');
     expect(source).not.toContain('formatVoiceDuration');

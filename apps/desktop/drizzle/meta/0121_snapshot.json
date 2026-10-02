@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "44981df3-7a5e-4f6d-9284-cae1b3cdba55",
+  "id": "d90a85b3-4d49-43e0-b0ec-644c0c0e02ba",
   "prevId": "87e4ab7e-d6f1-43ed-93f4-f769913af593",
   "tables": {
     "account_usage_snapshots": {
@@ -3556,6 +3556,99 @@
       "uniqueConstraints": {},
       "checkConstraints": {}
     },
+    "plugin_task_requests": {
+      "name": "plugin_task_requests",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "plugin_id": {
+          "name": "plugin_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "operation": {
+          "name": "operation",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "target_id": {
+          "name": "target_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "request_key": {
+          "name": "request_key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "fingerprint": {
+          "name": "fingerprint",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "payload": {
+          "name": "payload",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "revision": {
+          "name": "revision",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 0
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "plugin_task_request_key": {
+          "name": "plugin_task_request_key",
+          "columns": [
+            "plugin_id",
+            "operation",
+            "target_id",
+            "request_key"
+          ],
+          "isUnique": true
+        },
+        "plugin_task_target": {
+          "name": "plugin_task_target",
+          "columns": [
+            "target_id",
+            "plugin_id"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
     "project_aliases": {
       "name": "project_aliases",
       "columns": {
@@ -4850,13 +4943,6 @@
           "notNull": true,
           "autoincrement": false,
           "default": false
-        },
-        "codex_follow_up_mode": {
-          "name": "codex_follow_up_mode",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
         },
         "plan_mode_enabled": {
           "name": "plan_mode_enabled",

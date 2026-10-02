@@ -162,6 +162,10 @@ const CORE_INVOKE_CHANNELS: readonly string[] = [
   'maker:list-active',
   'maker:any-session-in-turn',
   'maker:session-in-turn',
+  // Review evidence and the Reviewer session are created on the data-owning
+  // device. The handler remains host-owned; this only permits the explicit
+  // start request to cross the device-link tunnel.
+  'maker:review:start',
   // —— 输入队列(input queue 全集,无本机副作用)——
   DL_SESSION_REFERENCE_CAPABILITY_CHANNEL,
   'maker:codex-follow-up:get',
@@ -647,6 +651,10 @@ export const PUSH_FORWARD_ALLOWLIST: ReadonlySet<string> = new Set([
   'maker:interaction-dismissed',
   // Claude Auto classifier 故障后降级到 ask;payload 带 sessionId,控制端显示同款提示。
   'maker:auto-permission:fallback',
+  // Deferred model-provider outcome. Both payloads contain only task identity
+  // and selected route or a bounded failure code; no native error text.
+  'maker:session-credential-switch-applied',
+  'maker:session-credential-switch-failed',
   // 被控端 active-catalog revision 变化：控制端按 deviceId 驱逐并重拉 provider 目录。
   'maker:provider:changed',
   // 注:maker:auth:state-changed 曾在此 —— 但发射点不 tap、控制端也不消费(被控端 agent 鉴权
@@ -739,6 +747,9 @@ export const PUSH_FORWARD_ALLOWLIST: ReadonlySet<string> = new Set([
  * client-agnostic:mobile/web 控制端应使用同一映射(与 allowlist 同为协议契约)。
  */
 export const INVOKE_TIMEOUT_OVERRIDES_MS: Readonly<Record<string, number>> = {
+  // Evidence collection may include git diff and bounded artifact reads before
+  // the host can acknowledge the newly-created Reviewer session.
+  'maker:review:start': 90_000,
   // Two Git preflight/apply stages each allow 30s, plus snapshot and queue overhead.
   'maker:turn-change-set:apply': 90_000,
   [FILE_PEER_CHANNEL]: 30_000,

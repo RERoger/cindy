@@ -148,6 +148,8 @@
     "turnTokens": "{{tokens}} tokens"
   },
   "lightbox": {
+    "sourceMissing": "The source image is missing on this computer. Import the original file again.",
+    "deviceOffline": "The computer is disconnected. Reconnect and try again.",
     "cancelAnnotation": "Cancel annotation",
     "cancel": "Cancel",
     "undoLastStroke": "Undo last stroke",
@@ -330,5 +332,10 @@
     "remove": "Remove quote",
     "closePreview": "Close quote preview",
     "menuLabel": "Add to chat"
+  },
+  "learning": {
+    "memory": "Remembered: {{title}}",
+    "skillCreated": "Created skill: {{title}}",
+    "skillUpdated": "Updated skill: {{title}}"
   }
 }

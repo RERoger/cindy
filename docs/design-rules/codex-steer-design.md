@@ -1,7 +1,7 @@
 # Codex 对话跟进方式
 
 > 日期：2026-09-30。状态：已实现，Windows 打包预览经用户验证；远程连接与双主题目检待验收。
-> 分支：`codex-steer`，基于 `origin/main` 的 `8503ece6d81c98a5a3e44a2da1bb487427afdbd5`。
+> 分支：`codex-steer`；2026-10-02 同步主干，并基于主干迁移链重新生成 0123。
 
 ## 用户界面
 
@@ -18,7 +18,7 @@
 
 全局覆盖使用执行电脑 userData 下的 `codex-follow-up-settings.json`，复用原子覆盖文件与跨进程锁。
 每个任务的 `sessions.codex_follow_up_mode` 可为 null / queue / steer；null 表示继承。
-通过新增 Drizzle migration 0121 添加 nullable 列，不改历史 migration。
+通过新增 Drizzle migration 0123 添加 nullable 列，不改历史 migration。
 新任务默认继承，fork 复制显式覆盖。读取最终值为「任务覆盖优先，否则全局，默认 queue」。
 切换方式只影响后续普通发送，不自动迁移已排队消息。
 
@@ -61,3 +61,11 @@ projection 可选 `composerAutoDelivery: true` 声明支持能力。
 在普通 Codex 活动轮次分别选排队/引导，核对消息落点、取消、附件与上下文；检查闲置发送、Stop/clear 竞态。
 使用 SSH 和同账号手机远控核对执行端设置、多控制端同步、断链后不重复投递；以旧主机检查控件隐藏。
 分别目检 Light / Dark、窄窗口、键盘聚焦、标题和完整提示文本。
+
+## 2026-10-02 主干同步
+
+- 合并最新主干，保留主干的插件任务、Review、翻译及远程准入变更。
+- 丢弃本分支未合入的 0121 迁移，基于主干 0122 快照由 Drizzle 重新生成 `0123_eager_landau`；主干历史 SQL、脚本和元数据保持不变。
+- Desktop 6 个文件 502 项、Mobile 发件箱 73 项、device-link 准入 52 项定向测试通过。
+- 迁移静态校验与 12 项 SQLite 重放通过，新增 v122 升级测试验证既有任务数据不变、默认继承和重复重放保留显式引导偏好。
+- i18n、术语和文档检查通过，保留既有非阻断告警。此次同步未重新打包或进行远程、双主题实机验收。

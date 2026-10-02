@@ -179,14 +179,18 @@ import {
   mergeSlashCommands,
 } from '@/session/composerPalette';
 import {
+  type StoredAgentRestoreState,
   DEFAULT_NEW_SESSION_DRAFT,
   NEW_SESSION_AGENT_OPTIONS,
   availableNewSessionAgentOptions,
+  canResolveStoredAgentRuntime,
   defaultPermissionModeForNewSessionAgent,
   buildRemoteCreateSessionOptions,
   buildRecentWorkspaceOptions,
   filterRemoteDirectoryEntries,
   isCurrentRemoteBrowseRequest,
+  isStoredAgentRestorePending,
+  nextStoredAgentRestoreStep,
   normalizeRemoteDirectoryDrives,
   shouldRetryRemoteBrowseDrives,
   normalizeCreateSessionResult,
@@ -265,6 +269,7 @@ import {
   resolveMobileComposerVoiceButtonPlacement,
 } from '@/session/MobileComposerInputRow';
 import { VoiceRecordingPillContent, useMobileVoiceRecordingTimer } from '@/session/VoiceRecordingPill';
+import { VoicePillWidthFrame } from '@/session/voicePillWidthMotion';
 import { useMobileVoiceProcessingIndicator } from '@/session/useMobileVoiceProcessingIndicator';
 import { useComposerCardTransition } from '@/session/useComposerCardTransition';
 import { ComposerKeyboardAvoidingView } from '@/session/ComposerKeyboardAvoidingView';
@@ -462,6 +467,7 @@ export default function NewRemoteSessionScreen() {
     composerMorph?: string;
     visualDraft?: string;
     suggestion?: string;
+    draft?: string;
     recoverySessionId?: string;
   }>();
   const routeDeviceId = String(params.deviceId ?? '');
@@ -484,7 +490,7 @@ export default function NewRemoteSessionScreen() {
   const composerDock = useComposerDock();
   const visualInitialDraft = MOBILE_VISUAL_MOCK_ENABLED ? readRouteString(params.visualDraft) : null;
   const router = useRouter();
-  const nativeSelectionSheet = Platform.OS === 'ios';
+  const nativeSelectionSheet = Platform.OS === 'ios' || Platform.OS === 'android';
   const auth = useAuth();
   const outboxOwner = useSyncExternalStore(subscribeMobileAuthOwner, getMobileAuthOwner, getMobileAuthOwner);
   const {
@@ -552,7 +558,7 @@ export default function NewRemoteSessionScreen() {
   );
   const [draft, setDraft] = useState<NewSessionDraft>({
     ...DEFAULT_NEW_SESSION_DRAFT,
-    firstMessage: visualInitialDraft ?? (isRemoteTaskSuggestionId(params.suggestion)
+    firstMessage: visualInitialDraft ?? readRouteString(params.draft) ?? (isRemoteTaskSuggestionId(params.suggestion)
       ? t(`devices.list.taskSuggestions.items.${params.suggestion}.prompt`)
       : DEFAULT_NEW_SESSION_DRAFT.firstMessage),
     // 无记忆时默认对话；偏好加载后恢复上次选择，显式项目入口优先。
@@ -900,7 +906,7 @@ export default function NewRemoteSessionScreen() {
         count: MOBILE_MAX_ATTACHMENTS,
       }));
     } else if (selection.rejectedUris.length > 0) {
-      setAttachmentError(i18n.t('composer.upload.fileTypeUnsupported'));
+      setAttachmentError(i18n.t('composer.upload.noFileRead'));
     } else {
       setAttachmentError(null);
     }
@@ -945,7 +951,8 @@ export default function NewRemoteSessionScreen() {
   const atLoadSeqRef = useRef(0);
   const initialWorkspaceKeyRef = useRef<string | null>(null);
   const appliedDefaultDeviceKeyRef = useRef<string | null>(null);
-  const appliedStoredAgentRef = useRef<NewSessionAgentKind | null>(null);
+  // 上次 agent 的恢复进度(唯一写入者:下面的恢复 effect)。见 nextStoredAgentRestoreStep。
+  const storedAgentRestoreRef = useRef<StoredAgentRestoreState | null>(null);
   // 权限记忆只在偏好加载后恢复一次(之后由用户选择 / 切 agent 驱动),防止重复覆盖。
   const appliedPermissionMemoryRef = useRef(false);
   const userTouchedDeviceRef = useRef(false);
@@ -1152,11 +1159,66 @@ export default function NewRemoteSessionScreen() {
     const storedAgentKind = newSessionPreferences?.agentKind;
     if (!newSessionPreferencesLoaded || !storedAgentKind) return;
     if (userTouchedRuntimeRef.current) return;
-    if (appliedStoredAgentRef.current === storedAgentKind) return;
-    const expectedDeviceId = preferredDefaultDevice?.deviceId ?? '';
-    if (expectedDeviceId && selectedDeviceId !== expectedDeviceId) return;
-    if (selectedDeviceId && deviceProviders.loading && deviceProviders.providers.length === 0) return;
-    appliedStoredAgentRef.current = storedAgentKind;
+    const restored = storedAgentRestoreRef.current;
+    if (!isStoredAgentRestorePending({
+      storedAgentKind,
+      appliedStoredAgentKind: restored?.phase === 'done' ? restored.agentKind : null,
+      expectedDeviceId: preferredDefaultDevice?.deviceId ?? '',
+      selectedDeviceId,
+    })) return;
+    // agent 偏好一到就恢复;模型要等目录或该 agent 的最近任务,否则只能落到内置兜底模型。
+    const step = nextStoredAgentRestoreStep({
+      storedAgentKind,
+      restored,
+      modelReady: canResolveStoredAgentRuntime({
+        agentKind: storedAgentKind,
+        sessions,
+        deviceId: selectedDeviceId,
+        catalogReady: deviceProviders.ready,
+        providersUnsupported: deviceProviders.unsupported,
+      }),
+    });
+    if (!step) return;
+    storedAgentRestoreRef.current = { agentKind: storedAgentKind, phase: step === 'agent' ? 'agent' : 'done' };
+    // 现场按最新目录算该 agent 的默认运行配置(rows 与 ready 必须同一代,codex review P2)。
+    const resolveStoredRuntime = (currentEffort: string) => {
+      const rowsNow = flattenProviderSections(
+        buildMobileModelSections({
+          providers: deviceProvidersRef.current.providers,
+          agentKind: storedAgentKind,
+          visibilityOverrides: deviceProvidersRef.current.modelVisibilityOverrides,
+        }).sections,
+      );
+      const next = pickAgentDefaultRuntime({
+        agentKind: storedAgentKind,
+        sessions,
+        deviceId: selectedDeviceId || undefined,
+        modelRows: rowsNow,
+        currentEffort,
+        catalogReady: catalogReadyRef.current,
+      });
+      return {
+        model: next.model,
+        effort: next.effort,
+        providerId: next.providerId,
+        // fast 按 (agent, 来源, 模型) 记忆恢复,无记忆置 false;恢复前过与手动选行
+        // 同款的 fastEditable 门控(codex review P2:目录/能力变化后不得恢复出
+        // UI 显示关、实际发 true 的矛盾态)。agent 级门控只认目标 agent 的缓存
+        // 能力表(codex review P1:此刻闭包里的 capabilities 属于切换前 agent 或
+        // 为 null);目标 caps 未就绪 → false,由延迟恢复 effect 就绪后补评。
+        fastMode: next.providerId
+          && isFastRestorable(next.agentKind, next.providerId, next.model, rowsNow, targetAgentHasFast(selectedDeviceId, next.agentKind))
+          ? (draftMemory.getFast(next.agentKind, next.providerId, next.model) ?? false)
+          : false,
+      };
+    };
+    if (step === 'model') {
+      // agent 与权限已在第一步恢复;只补模型,不动 agent 与权限(期间用户改过权限/计划模式不被覆盖)。
+      setDraft((current) => (current.agentKind === storedAgentKind
+        ? { ...current, ...resolveStoredRuntime(current.effort) }
+        : current));
+      return;
+    }
     // 该路径同时负责恢复 agent 权限，下面的通用权限记忆 effect 不再重复弹框。
     appliedPermissionMemoryRef.current = true;
     if (selectedDeviceId) autoDefaultDeviceRef.current = selectedDeviceId;
@@ -1176,50 +1238,21 @@ export default function NewRemoteSessionScreen() {
       if (deviceAtTrigger !== selectedDeviceRef.current) return;
       // 确认期间用户又切了 agent / 手动选了模型 → 旧回调不得覆盖新选择。
       if (seqAtTrigger !== runtimeActionSeqRef.current) return;
-      setDraft((current) => {
-        // rows 与 ready 必须同一代(codex review P2):提交时用最新目录现场重建,
-        // 不用触发时捕获的旧 rows。
-        const rowsNow = flattenProviderSections(
-          buildMobileModelSections({
-            providers: deviceProvidersRef.current.providers,
-            agentKind: storedAgentKind,
-            visibilityOverrides: deviceProvidersRef.current.modelVisibilityOverrides,
-          }).sections,
-        );
-        const next = pickAgentDefaultRuntime({
-          agentKind: storedAgentKind,
-          sessions,
-          deviceId: selectedDeviceId || undefined,
-          modelRows: rowsNow,
-          currentEffort: current.effort,
-          catalogReady: catalogReadyRef.current,
-        });
-        return {
-          ...current,
-          agentKind: next.agentKind,
-          model: next.model,
-          effort: next.effort,
-          // 上次明确选择过的权限直接沿用；内置默认若升级到 Full access 仍需确认。
-          permissionMode: confirmed ? nextPermissionMode : current.permissionMode,
-          providerId: next.providerId,
-          // fast 按 (agent, 来源, 模型) 记忆恢复,无记忆置 false;恢复前过与手动选行
-          // 同款的 fastEditable 门控(codex review P2:目录/能力变化后不得恢复出
-          // UI 显示关、实际发 true 的矛盾态)。agent 级门控只认目标 agent 的缓存
-          // 能力表(codex review P1:此刻闭包里的 capabilities 属于切换前 agent 或
-          // 为 null);目标 caps 未就绪 → false,由延迟恢复 effect 就绪后补评。
-          fastMode: next.providerId
-            && isFastRestorable(next.agentKind, next.providerId, next.model, rowsNow, targetAgentHasFast(selectedDeviceId, next.agentKind))
-            ? (draftMemory.getFast(next.agentKind, next.providerId, next.model) ?? false)
-            : false,
-        };
-      });
+      setDraft((current) => ({
+        ...current,
+        ...resolveStoredRuntime(current.effort),
+        agentKind: storedAgentKind,
+        // 上次明确选择过的权限直接沿用；内置默认若升级到 Full access 仍需确认。
+        permissionMode: confirmed ? nextPermissionMode : current.permissionMode,
+      }));
     })();
     return () => {
       cancelled = true;
     };
   }, [
     draft.permissionMode,
-    deviceProviders.loading,
+    deviceProviders.ready,
+    deviceProviders.unsupported,
     deviceProviders.providers,
     deviceProviders.modelVisibilityOverrides,
     newSessionPreferences,
@@ -3881,48 +3914,51 @@ export default function NewRemoteSessionScreen() {
   ) : null;
 
   const renderComposerVoiceButton = (buttonStyle?: StyleProp<ViewStyle>) => (
-    <Pressable
-      accessibilityLabel={voiceIsListening ? t('session.common.voiceStopRecording') : t('session.new.voiceInput')}
-      accessibilityRole="button"
-      accessibilityState={{ busy: voiceIsProcessing || undefined, disabled: creating || undefined }}
-      disabled={creating || voiceIsProcessing}
-      hitSlop={10}
-      onPress={() => {
-        if (voiceStartedOnPressInRef.current) {
-          // 本次按下已在 pressIn 起录:松手不当作「再点一下停止」。
+    <VoicePillWidthFrame hitSlop={10} width={voiceRecordingTimer.pillWidth}>
+      <Pressable
+        accessibilityLabel={voiceIsListening ? t('session.common.voiceStopRecording') : t('session.new.voiceInput')}
+        accessibilityRole="button"
+        accessibilityState={{ busy: voiceIsProcessing || undefined, disabled: creating || undefined }}
+        disabled={creating || voiceIsProcessing}
+        hitSlop={10}
+        onPress={() => {
+          if (voiceStartedOnPressInRef.current) {
+            // 本次按下已在 pressIn 起录:松手不当作「再点一下停止」。
+            voiceStartedOnPressInRef.current = false;
+            return;
+          }
+          toggleVoiceRecording();
+        }}
+        onPressIn={handleVoiceButtonPressIn}
+        onTouchCancel={() => {
+          // 手势被系统/滚动打断:撤销这次按下误触发的录音(与会话页同语义,
+          // 正常松手不触发;cancelVoiceForDeviceSwitch 会作废在途启动并释放音频)。
+          if (!voiceStartedOnPressInRef.current) return;
           voiceStartedOnPressInRef.current = false;
-          return;
-        }
-        toggleVoiceRecording();
-      }}
-      onPressIn={handleVoiceButtonPressIn}
-      onTouchCancel={() => {
-        // 手势被系统/滚动打断:撤销这次按下误触发的录音(与会话页同语义,
-        // 正常松手不触发;cancelVoiceForDeviceSwitch 会作废在途启动并释放音频)。
-        if (!voiceStartedOnPressInRef.current) return;
-        voiceStartedOnPressInRef.current = false;
-        cancelVoiceForDeviceSwitch();
-      }}
-      style={({ pressed }) => [
-        styles.composerIconButton,
-        buttonStyle,
-        // 胶囊底色跟随计时内容(含 pressIn 乐观 pending 期),不只 listening。
-        voiceRecordingTimer.label !== null && styles.composerIconButtonActive,
-        voiceRecordingTimer.label !== null && { width: voiceRecordingTimer.pillWidth },
-        (creating || (voiceIsProcessing && !voiceProcessingIndicator.stopping)) && styles.disabled,
-        pressed && styles.pressed,
-      ]}
-      testID="newSession.voiceButton"
-    >
-      {voiceProcessingIndicator.showProcessing ? (
-        <ActivityIndicator color={colors.textSecondary} size="small" />
-      ) : voiceRecordingTimer.label !== null ? (
-        // 录音中:胶囊展开为脉冲红点 + 计时(对齐桌面/会话页),点胶囊任意位置停止。
-        <VoiceRecordingPillContent label={voiceRecordingTimer.label} testID="newSession.voiceRecordingPill" />
-      ) : (
-        <Mic color={colors.textSecondary} size={iconSize.sm} strokeWidth={iconStroke.regular} />
-      )}
-    </Pressable>
+          cancelVoiceForDeviceSwitch();
+        }}
+        style={({ pressed }) => [
+          styles.composerIconButton,
+          buttonStyle,
+          // 胶囊底色跟随计时内容(含 pressIn 乐观 pending 期),不只 listening。
+          voiceRecordingTimer.label !== null && styles.composerIconButtonActive,
+          // 宽度由外框 VoicePillWidthFrame 驱动(录音胶囊展开 / 收回的过渡),按钮撑满外框。
+          styles.voicePillFill,
+          (creating || (voiceIsProcessing && !voiceProcessingIndicator.stopping)) && styles.disabled,
+          pressed && styles.pressed,
+        ]}
+        testID="newSession.voiceButton"
+      >
+        {voiceProcessingIndicator.showProcessing ? (
+          <ActivityIndicator color={colors.textSecondary} size="small" />
+        ) : voiceRecordingTimer.label !== null ? (
+          // 录音中:胶囊展开为脉冲红点 + 计时(对齐桌面/会话页),点胶囊任意位置停止。
+          <VoiceRecordingPillContent label={voiceRecordingTimer.label} testID="newSession.voiceRecordingPill" />
+        ) : (
+          <Mic color={colors.textSecondary} size={iconSize.sm} strokeWidth={iconStroke.regular} />
+        )}
+      </Pressable>
+    </VoicePillWidthFrame>
   );
 
   // 切 agent:跟随该 agent 的最近会话 → 否则该 agent 列表最上面 → 否则内置默认(见 pickAgentDefaultRuntime),
@@ -6485,6 +6521,7 @@ export default function NewRemoteSessionScreen() {
       /> : null}
       <SheetModal
         backdropTestID="newSession.worktreeBranchSheet.backdrop"
+        nativePresentation
         onBackdropPress={() => setWorktreeBranchSheetOpen(false)}
         onRequestClose={() => setWorktreeBranchSheetOpen(false)}
         visible={worktreeBranchSheetVisible}
@@ -7283,6 +7320,9 @@ const makeStyles = (colors: ThemeColors) => StyleSheet.create({
     paddingHorizontal: spacing.sm,
     paddingVertical: spacing.sm,
   },
+  // 语音按钮撑满 VoicePillWidthFrame,宽度由外框的过渡驱动;裁剪保证展开初段
+  // 红点 + 计时尚未装下时不会溢出盖住左邻控件。
+  voicePillFill: { overflow: 'hidden', width: '100%' },
   composerIconButton: {
     alignItems: 'center',
     backgroundColor: colors.sheetActionSurface,

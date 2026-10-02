@@ -1425,6 +1425,7 @@ interface ElectronAPI {
     ) => Promise<{ status: 'saved'; savedPath: string } | { status: 'canceled' }>;
     /** 启用/停用(停用 = 面板休眠,布局位置保留)。 */
     setEnabled: (id: string, enabled: boolean) => Promise<{ ok: true }>;
+    requestTaskApproval: (id: string) => Promise<{ granted: boolean }>;
     /** 目录级禁用清单(插件页项目范围视图;sendSync 切换同帧渲染)。 */
     workdirPrefsSync: (workdir: string) => { disabled: string[] };
     /** 写/清一条目录级例外(disabled=false 即清除,回到跟随全局)。 */
@@ -4782,6 +4783,39 @@ interface ElectronAPI {
         session: import('@/lib/ccAgent.types').Session;
       }>;
       history: (botId: string) => Promise<unknown[]>;
+      workbench: {
+        get: (botId: string) => Promise<import('../shared/botWorkbench').BotWorkbench | null>;
+        addDirectory: (
+          botId: string,
+          path: string,
+        ) => Promise<{ ok: true } | { ok: false; errorCode: 'NOT_A_DIRECTORY' | 'TOO_MANY' }>;
+        removeDirectory: (botId: string, path: string) => Promise<void>;
+        readTask: (
+          botId: string,
+          taskId: string,
+        ) => Promise<
+          | { ok: true; taskId: string; transcript: import('../shared/botWorkbench').WorkbenchTranscript }
+          | { ok: false; errorCode: string; message: string }
+        >;
+        candidates: (
+          botId: string,
+        ) => Promise<
+          | {
+              ok: true;
+              candidates: Array<{
+                source: 'claude' | 'codex' | 'pi';
+                id: string;
+                projectDir: string | null;
+                updatedAt: string;
+                archived: boolean;
+              }>;
+            }
+          | { ok: false; errorCode: string; message: string }
+        >;
+        /** 每个在用的本机伙伴接手的项目目录(侧栏「在跟进」标记用)。 */
+        followScopes: () => Promise<Array<{ botId: string; directories: string[] }>>;
+      };
+      listSkills: (botId: string) => Promise<import('../shared/botSkill').BotSkillSummary[]>;
       memory: {
         list: (
           botId: string,
@@ -4924,6 +4958,10 @@ interface ElectronAPI {
           existing: number;
         };
         currentProjectDirs: string[];
+        /** 候选与本机已有项目里是 git 仓库的目录。 */
+        gitRepoDirs?: string[];
+        /** 主目录、应用数据目录、系统临时目录(伙伴工作台过滤非项目目录用)。 */
+        pathHints?: { homeDir: string | null; userDataDir: string | null; tempDirs: string[] };
       }>;
       importSelected: (
         items: Array<{ source: 'codex' | 'claude'; id: string }>,
@@ -5318,6 +5356,7 @@ interface ElectronAPI {
     onBotProfileChanged: (
       cb: (payload: { botId: string; change: 'created' | 'updated' }) => void,
     ) => () => void;
+    onBotWorkbenchChanged: (cb: (payload: { botId: string }) => void) => () => void;
     runBotLifecycleAction: (
       request: import('../shared/botLifecycle').BotLifecycleActionRequest,
     ) => Promise<import('../shared/botLifecycle').BotLifecycleActionResult>;
@@ -5386,6 +5425,14 @@ interface ElectronAPI {
       options?: CustomProviderUpdateOptions,
     ) => Promise<CustomProviderUpdateResult>;
     localModelStatus: () => Promise<import('../shared/localModelRuntime').LocalRuntimeStatus>;
+    llamaCppEnsure: () => Promise<void>;
+    llamaCppStatus: () => Promise<import('../shared/llamaCpp').LlamaCppSnapshot>;
+    llamaCppInstall: () => Promise<void>;
+    llamaCppFiles: (repo: string) => Promise<import('../shared/llamaCpp').LlamaCppFile[]>;
+    llamaCppDownload: (input: import('../shared/llamaCpp').LlamaCppDownloadInput) => Promise<void>;
+    llamaCppStart: () => Promise<void>;
+    llamaCppStop: () => Promise<void>;
+    llamaCppCancel: (action?: 'cancel' | 'pause' | 'resume') => Promise<void>;
     localModelStart: () => Promise<import('../shared/localModelRuntime').LocalRuntimeStatus>;
     localModelList: () => Promise<{
       status: import('../shared/localModelRuntime').LocalRuntimeStatus;
@@ -6199,6 +6246,8 @@ interface ElectronAPI {
     // effort/mode 透传 string —— 合法值由 maker capabilities 决定, vite-env 不重复枚举
     setEffort: (sessionId: string, effort: string) => Promise<void>;
     setPermissionMode: (sessionId: string, mode: string) => Promise<void>;
+    getPluginWriteAccessRecovery: (sessionId: string) => Promise<{available: boolean}>;
+    retryPluginWriteAccess: (sessionId: string) => Promise<{granted: boolean; mode?: 'acceptEdits' | 'auto'}>;
     setFastMode: (sessionId: string, enabled: boolean) => Promise<void>;
     setThinkingEnabled: (sessionId: string, enabled: boolean) => Promise<void>;
     /** 计划模式一级开关(与 permissionMode 正交); DB 持久化由调用方另调 sessionService.update({ planModeEnabled }) */
@@ -6503,6 +6552,9 @@ interface ElectronAPI {
     onSessionCredentialSwitchApplied: (
       cb: (payload: { sessionId: string; model: string; providerId: string | null }) => void,
     ) => () => void;
+    onSessionCredentialSwitchFailed: (
+      cb: (payload: { sessionId: string; reason: 'apply-failed' | 'rollback-failed' }) => void,
+    ) => () => void;
 
     /** cc 默认路由会话的生效计费路由(proxy 按请求观察);null = 会话尚未发过请求 */
     claudeSessionRouteGet: (sessionId: string) => Promise<'gateway' | 'subscription' | null>;
@@ -6588,6 +6640,11 @@ interface ElectronAPI {
       workingDir?: string;
       turnGen: number;
       completionRevision: number;
+      cancel?: false;
+    } | {
+      sessionId: string;
+      completionRevision: number;
+      cancel: true;
     }) => Promise<{ prompt: string | null }>;
     helpAsk: (
       request: import('../shared/helpTypes').HelpAskRequest,
@@ -7359,24 +7416,7 @@ interface SkillhubPublishParams {
   changelog?: string;
 }
 
-type SkillhubPublishErrorCode =
-  | 'NAME_TAKEN'
-  | 'INVALID_DEPT'
-  | 'INVALID_NAME'
-  | 'CATEGORY_REQUIRED'
-  | 'MANIFEST_INVALID'
-  | 'VERSION_RACE'
-  | 'CHECKSUM_MISMATCH'
-  | 'NOT_AUTHOR'
-  | 'PACK_FAILED'
-  | 'OSS_PUT_FAILED'
-  | 'OSS_PUT_EXPIRED'
-  | 'OSS_OBJECT_NOT_FOUND'
-  | 'API_KEY_MISSING'
-  | 'CANCELLED'
-  | 'SKILL_HUB_READ_ONLY'
-  | 'INVALID_VISIBILITY'
-  | 'INTERNAL';
+type SkillhubPublishErrorCode = import('../shared/skillhubPublishErrors').SkillhubPublishErrorCode;
 
 type SkillhubPublishProgressEvent = (
   | { phase: 'packing' }

@@ -148,6 +148,8 @@
     "turnTokens": "{{tokens}} tokens"
   },
   "lightbox": {
+    "sourceMissing": "このコンピューターに元の画像がありません。元のファイルを再度インポートしてください。",
+    "deviceOffline": "コンピューターが未接続です。再接続してからお試しください。",
     "cancelAnnotation": "注釈をキャンセル",
     "cancel": "キャンセル",
     "undoLastStroke": "直前の描画を取り消す",
@@ -330,5 +332,10 @@
     "remove": "引用を削除",
     "closePreview": "引用プレビューを閉じる",
     "menuLabel": "チャットに追加"
+  },
+  "learning": {
+    "memory": "記憶しました：{{title}}",
+    "skillCreated": "スキルを作成：{{title}}",
+    "skillUpdated": "スキルを更新：{{title}}"
   }
 }
